@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en-US">
+  <head>
+    <style>
+      body {
+        background: #aaa;
+      }
+      canvas {
+        background: #000;
+        display: block;
+        margin: 0 auto;
+      }
+    </style>
+  </head>
+
+  <body onload="onLoad()" oncontextmenu="return false;" onchange="drawAll()">
+    <h2>
+      Kleuren en schaduwen
+    </h2>
+    <p>
+      We hebben 3 verschillende kleuren lampen. We beginnen met alleen de groene lamp aan.
+      Helemaal links staat een wit scherm. Het lijkt groen, omdat we alleen groen licht hebben. Als we alle lampen aan zetten zien we dat het scherm gewoon wit is.
+      In het midden staat een voorwerp. Deze blokkeert het licht van de lampen, en maakt een schaduw op het scherm.
+    </p>
+    <p>
+      Je kunt randstralen aanzetten om te snappen hoe de schaduw wordt gemaakt. Dan worden van alle lichtstralen er 2 getekend, net langs het voorwerp.
+    </p>
+    <p>
+      We kunnen door te klikken en slepen met de muis de positie van de lampen en het voorwerp veranderen. Met de linker muisknop verander je de grootte van het voorwerp.
+    <table>
+      <tr>
+        <td>
+           Rood:
+        </td>
+        <td width=100>
+          <select name="red" id="red">
+            <option value="on">Aan</option>
+            <option value="off">Uit</option>
+          </select>
+        </td>
+	<td>
+	  Teken randstralen:
+        </td>
+      <tr>
+      <tr>
+        <td>
+           Groen:
+        </td>
+        <td>
+          <select name="green" id="green">
+            <option value="on">Aan</option>
+            <option value="off">Uit</option>
+          </select>
+        </td>
+	<td>
+          <select name="edgeLines" id="edgeLines">
+            <option value="on">Aan</option>
+            <option value="off">Uit</option>
+          </select>
+        </td>
+      <tr>
+      <tr>
+        <td>
+           Blauw:
+        </td>
+        <td>
+          <select name="blue" id="blue">
+            <option value="on">Aan</option>
+            <option value="off">Uit</option>
+          </select>
+        </td>
+        <td>
+        </td>
+      <tr>
+    </table>
+    <canvas id="myCanvas" width="720" height="480"></canvas>
+
+    <script>
+const canvas = document.getElementById("myCanvas");
+const ctx = canvas.getContext("2d");
+
+const canvasOffset = canvas.getBoundingClientRect();
+const offsetX = canvasOffset.left;
+const offsetY = canvasOffset.top;
+
+const cw = canvas.width;
+const ch = canvas.height;
+
+const PI2 = Math.PI * 2;
+
+var isDown = false;
+var lastX;
+var lastY;
+
+var lamps = [];
+var draggingObject = -1;
+var changeLength = false;
+
+var thing = {
+    x: 200,
+    y: ch / 2,
+    length: 60
+};
+
+function onLoad() {
+    document.getElementById("red").value = "off";
+    document.getElementById("green").value = "on";
+    document.getElementById("blue").value = "off";
+    document.getElementById("edgeLines").value = "off";
+    drawAll();
+}
+
+function makeLamp(color, x, y, on, puntbron) {
+    return {
+        color: color,
+        x: x,
+        y: y,
+        on: on,
+        puntbron: puntbron
+    };
+}
+
+function drawAll() {
+    let screenSections = []; //contains all sections of the screen lit by different colored light.
+
+    // Clear screen
+    ctx.clearRect(0, 0, cw, ch);
+
+    // Draw Lamps.
+    // To win time, we collect the colors of the lamps in the same loop
+    let lampCombinedColor = drawLamps();
+
+    drawThing(lampCombinedColor);
+
+    // We draw edge lines, and collect for each intersection with the screen an object with location and color.
+    screenSections = drawEdgeLines();
+
+    drawScreen(lampCombinedColor, screenSections);
+}
+
+function drawScreen(lampCombinedColor, screenSections) {
+    screenSections.sort((a, b) => a.y - b.y);  //Sort array of intersect objects by y coordinates.
+
+    let previousSectionY = 0;
+    let sectionColor = lampCombinedColor;
+    for (let i = 0; i < screenSections.length; i++) {
+        let section = screenSections[i];
+
+        // Draw portion of the screen
+        ctx.beginPath();
+        ctx.fillStyle = sectionColor;
+        ctx.fillRect(0, previousSectionY, 10, section.y - previousSectionY);
+
+        // Get color of next section
+        let colorIndex = section.color.indexOf("FF");
+        if(sectionColor.substr(colorIndex, 2) === "00") {
+            sectionColor = sectionColor.substr(0, colorIndex) + "FF" + sectionColor.substr(colorIndex + 2);
+        } else {
+            sectionColor = sectionColor.substr(0, colorIndex) + "00" + sectionColor.substr(colorIndex + 2);
+        }
+
+        previousSectionY = section.y;
+    }
+
+    // Draw the last section of the screen.
+    // We need to set the Y coordinate to 0,
+    // or it won't draw the section long enough
+    if (previousSectionY < 0) { previousSectionY = 0; }
+    ctx.beginPath();
+    ctx.fillStyle = sectionColor;
+    ctx.fillRect(0, previousSectionY, 10, ch);
+}
+
+function drawEdgeLines() {
+    let screenSections = [];
+    let yUpperThing = thing.y - (thing.length / 2);
+    let yLowerThing = thing.y + (thing.length / 2);
+    let yUpperScreen;
+    let yLowerScreen;
+    let lengthAboveY;
+    let screenSectionY;
+    let lengthBelowY;
+
+    for (let i = 0; i < lamps.length; i++) {
+        let lamp = lamps[i];
+        if (lamp.on) {
+            if (lamp.x > thing.x) {
+                let scale = (lamp.x - 10) / (lamp.x - thing.x);
+                if (yUpperThing > lamp.y) {
+                    lengthAboveY = yUpperThing - lamp.y;
+                    screenSectionY = lamp.y + (lengthAboveY * scale);
+                } else {
+                    lengthAboveY = lamp.y - yUpperThing;
+                    screenSectionY = lamp.y - (lengthAboveY * scale);
+                }
+
+                if (document.getElementById("edgeLines").value == "on") {
+                    ctx.beginPath();
+                    ctx.moveTo(lamp.x, lamp.y);
+                    ctx.lineTo(10, screenSectionY);
+                    ctx.strokeStyle = lamp.color;
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+                }
+
+                screenSections.push({y: screenSectionY, color: lamp.color});
+
+                if (yLowerThing > lamp.y) {
+                    lengthBelowY = yLowerThing - lamp.y;
+                    screenSectionY = lamp.y + (lengthBelowY * scale);
+                } else {
+                    lengthBelowY = lamp.y - yLowerThing;
+                    screenSectionY = lamp.y - (lengthBelowY * scale);
+                }
+
+                if (document.getElementById("edgeLines").value == "on") {
+                    ctx.beginPath();
+                    ctx.moveTo(lamp.x, lamp.y);
+                    ctx.lineTo(10, screenSectionY);
+                    ctx.strokeStyle = lamp.color;
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+                }
+
+                screenSections.push({y: screenSectionY, color: lamp.color});
+            }
+        }
+    }
+    return screenSections;
+}
+
+
+function drawLamps() {
+    let thingColor = "#000000";
+
+    // Draw each lamp
+    // and get color combination for the thing
+    for (let i = 0; i < lamps.length; i++) {
+        let lamp = lamps[i];
+
+        // toggle lamps on or off by the value selected
+        if (lamp.color === "#FF0000") {
+            if (document.getElementById("red").value === "on") {
+                lamps[i].on = true;
+            } else {
+                lamps[i].on = false;
+            }
+        }
+        if (lamp.color === "#00FF00") {
+            if (document.getElementById("green").value === "on") {
+                lamps[i].on = true;
+            } else {
+                lamps[i].on = false;
+            }
+        }
+        if (lamp.color === "#0000FF") {
+            if (document.getElementById("blue").value === "on") {
+                lamps[i].on = true;
+            } else {
+                lamps[i].on = false;
+            }
+        }
+        if (lamp.on) {
+            ctx.beginPath();
+            ctx.arc(lamp.x, lamp.y, 2, 0, PI2);
+            ctx.closePath();
+            ctx.fillStyle = lamp.color;
+            ctx.fill();
+            thingColor = thingColor.substr(0, lamp.color.search("FF")) + "FF" + thingColor.substr(-5 + lamp.color.search("FF"), 5 - lamp.color.search("FF"));
+        }
+    }
+    return thingColor;
+}
+
+
+function drawThing(thingColor) {
+    // Draw thing
+    ctx.beginPath();
+    ctx.moveTo(thing.x, thing.y - thing.length / 2);
+    ctx.lineTo(thing.x, thing.y + thing.length / 2);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = thingColor;
+    ctx.stroke();
+}
+
+function handleMouseDown(e) {
+    // save the mouse position
+    // in case this becomes a drag operation
+    lastX = parseInt(e.clientX - offsetX);
+    lastY = parseInt(e.clientY - offsetY);
+
+    // if left button is clicked
+    if(e.button == 0) {
+        // hit test all existing lamps
+        let hit = -1;
+        for (let i = 0; i < lamps.length; i++) {
+            let lamp = lamps[i];
+            let dx = lastX - lamp.x;
+            let dy = lastY - lamp.y;
+            if (dx * dx + dy * dy < 5 * 5) {
+                hit = i;
+            }
+        }
+
+        if (hit >= 0) { // clicked on a lamp
+            draggingObject = lamps[hit];
+            isDown = true;
+        } else {
+            // hit test the thing
+            let dx = Math.abs(lastX - thing.x);
+            let dy = Math.abs(lastY - thing.y);
+            if ((dx < 4) && (dy < thing.length / 2)) {
+                draggingObject = thing;
+                isDown = true;
+            }
+        }
+    }
+
+    // if right button is clicked
+    if(e.button == 2) { 
+        // tell the browser we'll handle this event
+        e.preventDefault();
+        e.stopPropagation();
+
+        // hit test the thing
+        let dx = Math.abs(lastX - thing.x);
+        let dy = Math.abs(lastY - thing.y);
+        if ((dx < 4) && (dy < thing.length / 2)) {
+            changeLength = true;
+            isDown = true;
+        }    
+    }
+    drawAll();
+}
+
+
+function handleMouseMove(e) {
+
+    // if we're not dragging or changing length, just exit
+    if (!isDown) { return; }
+
+    // tell the browser we'll handle this event
+    e.preventDefault();
+    e.stopPropagation();
+
+    // get the current mouse position
+    let mouseX = parseInt(e.clientX - offsetX);
+    let mouseY = parseInt(e.clientY - offsetY);
+
+    // calculate how far the mouse has moved
+    // since the last mousemove event was processed
+    let dx = mouseX - lastX;
+    let dy = mouseY - lastY;
+
+    // reset the lastX/Y to the current mouse position
+    lastX = mouseX;
+    lastY = mouseY;
+
+    if(changeLength) {
+        thing.length += (dy / 2);
+    }
+
+    // change the target object's position by the 
+    // distance the mouse has moved since the last
+    // mousemove event
+    draggingObject.x += dx;
+    draggingObject.y += dy;
+
+    // Out of bounds rules
+    if ((draggingObject.x < 0) || (draggingObject.x > cw)) {
+        draggingObject.x = cw / 2;
+        isDown = false;
+        draggingObject = -1;
+    }
+    if ((draggingObject.y < 0) || (draggingObject.y > ch)) {
+        draggingObject.y = ch / 2;
+        isDown = false;
+        draggingObject = -1;
+    }
+
+    // redraw everything
+    drawAll();
+}
+
+function handleMouseUp(e) {
+    isDown = false;
+    draggingObject = -1;
+    changeLength = false;
+}
+
+document.addEventListener("mousedown", handleMouseDown);
+document.addEventListener("mousemove", handleMouseMove);
+document.addEventListener("mouseup", handleMouseUp);
+
+
+lamps.push(makeLamp("#FF0000", 400, ch / 4, false, true))
+lamps.push(makeLamp("#00FF00", 400, ch / 2 + 40, true, true));
+lamps.push(makeLamp("#0000FF", 400, 3 * (ch / 4), false, true));
+drawAll();
+
+    </script>
+    
+
+
+  </body>
+</html>
